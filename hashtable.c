@@ -16,13 +16,13 @@ struct node_t {
 	struct node_t* next;
 };
 
-typedef struct node_t Node;
+typedef struct node_t* Node;
 typedef int (*Hash)(int, int);
 
 struct hashtable_t {
 	int nr_buckets, nr_elements;
 	Hash hash_func;
-	Node** table;
+	Node* table;
 	int* buckets_sizes;
 };
 
@@ -34,10 +34,10 @@ typedef struct hashtable_t hashtable_t;
  * Auxiliary function:
  * allocate new pair of key-value
  */
-Node* entry_alloc(int key, void* value) { //TODO change name to node
+Node entry_alloc(int key, void* value) { //TODO change name to node
 
-	Node* newpair;
-	if ((newpair = malloc(sizeof(Node))) == NULL) {
+	Node newpair;
+	if ((newpair = malloc(sizeof(*newpair))) == NULL) {
 		return NULL;
 	}
 
@@ -52,12 +52,11 @@ Node* entry_alloc(int key, void* value) { //TODO change name to node
  *  Auxiliary function:
  *  destroys list of node by the head
  */
-void list_destroy(Node* node) { //TODO change name to node
+void list_destroy(Node node) { //TODO change name to node
 	if (!node)
 		return;
 	list_destroy(node->next);
 	free(node);
-	node = NULL;
 }
 
 /*
@@ -65,12 +64,12 @@ void list_destroy(Node* node) { //TODO change name to node
  * adds element to the tail of the list
  * the malloc is outside of this function
  */
-int list_add(Node** dest, Node* element) { //TODO change name to node
+int list_add(Node* dest, Node element) { //TODO change name to node
 	if (!element)
 		return -1;
 
-	Node* curr = *dest;
-	Node* prev = NULL;
+	Node curr = *dest;
+	Node prev = NULL;
 	while (curr) {
 		if (curr->key == element->key) {
 			return 0;
@@ -79,7 +78,7 @@ int list_add(Node** dest, Node* element) { //TODO change name to node
 		curr = curr->next;
 	}
 	//case of empty list, head == NULL
-	if (!curr) {
+	if (!prev) {
 		*dest = element;
 	} else {
 		prev->next = element;
@@ -92,7 +91,7 @@ int list_add(Node** dest, Node* element) { //TODO change name to node
  * finding element by the key
  * in one bucket
  */
-Node* list_find(Node* node, int key) { //TODO change name to node
+Node list_find(Node node, int key) { //TODO change name to node
 	if (!node) {
 		return NULL;
 	}
@@ -107,8 +106,8 @@ Node* list_find(Node* node, int key) { //TODO change name to node
  * removes element by the key
  * in one bucket
  */
-int list_remove(Node* node, int key) { //TODO change name to node
-	Node* next_node;
+int list_remove(Node node, int key) { //TODO change name to node
+	Node next_node;
 	if (!node)
 		return 0;
 	next_node = node->next;
@@ -125,16 +124,15 @@ int list_remove(Node* node, int key) { //TODO change name to node
  * finding element by the key
  * in the hash table
  */
-Node* hash_find(hashtable_t* table, int key, int* index) {
-	Node* element = NULL;
-	int i;
+Node hash_find(hashtable_t* table, int key, int* index) {
+	Node element = NULL;
+	int i, hashed_key;
 	if (!table)
 		return NULL;
-	for (i = 0; i < table->nr_buckets; i++) {
-		element = list_find(table->table[i], key);
-		if (element)
-			break;
-	}
+	hashed_key = table->hash_func(table->nr_buckets, key);
+	element = list_find(table->table[hashed_key], key);
+	if (element)
+		break;
 	if (index)
 		*index = i;
 	return element;
@@ -148,7 +146,7 @@ Node* hash_find(hashtable_t* table, int key, int* index) {
 void* hash_get_value(hashtable_t* table, int key) {
 	if (!table)
 		return NULL;
-	Node* element = hash_find(table, key, NULL);
+	Node element = hash_find(table, key, NULL);
 	if (!element)
 		return NULL;
 	return element->value;
@@ -168,7 +166,7 @@ hashtable_t* hash_alloc(int buckets, int (*hash)(int, int)) {
 	}
 
 	// Allocate array of nodes
-	if ((hashtable->table = malloc(sizeof(Node *) * buckets)) == NULL) {
+	if ((hashtable->table = malloc(sizeof(Node) * buckets)) == NULL) {
 		free(hashtable);
 		return NULL;
 	}
@@ -205,8 +203,9 @@ int hash_free(hashtable_t* ht) {
 int hash_insert(hashtable_t* table, int key, void* val) {
 	if (!table)
 		return -1;
-	Node* new_element = entry_alloc(key, val);
+	Node new_element = entry_alloc(key, val);
 	int hashed_key = table->hash_func(table->nr_buckets, key);
+
 	int retval = list_add(table->table + hashed_key, new_element);
 
 	if (retval == 0) {
@@ -225,7 +224,7 @@ int hash_update(hashtable_t* table, int key, void *val) {
 	if (!table)
 		return -1;
 
-	Node* element = hash_find(table, key, NULL);
+	Node element = hash_find(table, key, NULL);
 	if (element == NULL)
 		return 0;
 	element->value = val;
@@ -236,7 +235,7 @@ int hash_remove(hashtable_t* table, int key) {
 	if (!table)
 		return -1;
 	int* index;
-	Node* element = hash_find(table, key, index);
+	Node element = hash_find(table, key, index);
 	if (!element)
 		return 0;
 	//The element is the head:
@@ -256,7 +255,7 @@ int hash_remove(hashtable_t* table, int key) {
 int hash_contains(hashtable_t* table, int key) {
 	if (!table)
 		return -1;
-	Node* element = hash_find(table, key, NULL);
+	Node element = hash_find(table, key, NULL);
 	if (!element)
 		return 0;
 	return 1;
@@ -266,7 +265,7 @@ int list_node_compute(hashtable_t* table, int key, void* (*compute_func)(void*),
 		void** result) {
 	if (!table || !compute_func)
 		return -1;
-	Node* element = hash_find(table, key, NULL);
+	Node element = hash_find(table, key, NULL);
 	if (!element)
 		return 0;
 	*result = compute_func(element->value);
