@@ -124,17 +124,14 @@ int list_remove(Node node, int key) { //TODO change name to node
  * finding element by the key
  * in the hash table
  */
-Node hash_find(hashtable_t* table, int key, int* index) {
+Node hash_find(hashtable_t* table, int key) {
 	Node element = NULL;
-	int i, hashed_key;
+	int hashed_key;
 	if (!table)
 		return NULL;
 	hashed_key = table->hash_func(table->nr_buckets, key);
 	element = list_find(table->table[hashed_key], key);
-	if (element)
-		break;
-	if (index)
-		*index = i;
+
 	return element;
 }
 
@@ -146,7 +143,7 @@ Node hash_find(hashtable_t* table, int key, int* index) {
 void* hash_get_value(hashtable_t* table, int key) {
 	if (!table)
 		return NULL;
-	Node element = hash_find(table, key, NULL);
+	Node element = hash_find(table, key);
 	if (!element)
 		return NULL;
 	return element->value;
@@ -224,7 +221,7 @@ int hash_update(hashtable_t* table, int key, void *val) {
 	if (!table)
 		return -1;
 
-	Node element = hash_find(table, key, NULL);
+	Node element = hash_find(table, key);
 	if (element == NULL)
 		return 0;
 	element->value = val;
@@ -234,28 +231,28 @@ int hash_update(hashtable_t* table, int key, void *val) {
 int hash_remove(hashtable_t* table, int key) {
 	if (!table)
 		return -1;
-	int* index;
-	Node element = hash_find(table, key, index);
+	int hashed_key = table->hash_func(table->nr_buckets, key);
+	Node element = hash_find(table, key);
 	if (!element)
 		return 0;
 	//The element is the head:
-	if (table->table[*index] && table->table[*index]->key == key) {
-		table->table[*index] = element->next;
+	if (table->table[hashed_key] && table->table[hashed_key]->key == key) {
+		table->table[hashed_key] = element->next;
 		free(element);
 
 	} else {
-		if (list_remove(table->table[*index], key) != 1)
+		if (list_remove(table->table[hashed_key], key) != 1)
 			return -1;
 	}
 	table->nr_elements--;
-	table->buckets_sizes[*index]--;
+	table->buckets_sizes[hashed_key]--;
 	return 1;
 }
 
 int hash_contains(hashtable_t* table, int key) {
 	if (!table)
 		return -1;
-	Node element = hash_find(table, key, NULL);
+	Node element = hash_find(table, key);
 	if (!element)
 		return 0;
 	return 1;
@@ -265,7 +262,7 @@ int list_node_compute(hashtable_t* table, int key, void* (*compute_func)(void*),
 		void** result) {
 	if (!table || !compute_func)
 		return -1;
-	Node element = hash_find(table, key, NULL);
+	Node element = hash_find(table, key);
 	if (!element)
 		return 0;
 	*result = compute_func(element->value);
