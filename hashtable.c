@@ -6,32 +6,31 @@
  */
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <pthread.h>
 #include <stdbool.h>
 
 #include "hashtable.h"
 
-//#define _GNU_SOURCE
-
-typedef struct node_t {
+struct node_t {
 	pthread_mutex_t mutex;
 	int key;
 	void* value;
 	struct node_t* next;
-}* Node;
+};
 
+typedef struct node_t* Node;
 typedef int (*Hash)(int, int);
 
-typedef struct hashtable_t {
+struct hashtable_t {
 	int nr_buckets, nr_elements;
 	Hash hash_func;
 	Node* table;
 	pthread_mutex_t* empty_list_locks; //locks only for dummy node, not entire list
 	int* buckets_sizes;
-}* Hashtable;
+};
 
-typedef op_t* Op;
-
+typedef struct hashtable_t hashtable_t;
 //-----------------------------------------------------//
 //Auxiliary functions:
 
@@ -111,8 +110,7 @@ int list_add(Node* dest, Node element, pthread_mutex_t *head_mutex) {
 int list_update(Node head, int key, void* val) {
 	Node curr, prev;
 	curr = head;
-	if (!head)
-		return 0;
+	if(!head) return 0;
 	pthread_mutex_lock(&curr->mutex);
 	prev = NULL;
 
@@ -167,6 +165,8 @@ int list_remove(Node head, int key) {
 	pthread_mutex_unlock(&curr->mutex);
 	return 0;
 }
+
+
 
 bool list_contains(Node head, int key) {
 	Node curr, prev;
@@ -345,53 +345,4 @@ int hash_getbucketsize(hashtable_t* table, int bucket) { //TODO ask if the bucke
 	if (bucket < 0 || bucket >= table->nr_buckets)
 		return -1;
 	return table->buckets_sizes[bucket];
-}
-
-typedef struct args_t {
-	Hashtable table;
-	Op op;
-}* Args;
-
-void* thread_routine(void* args) {
-	Args arguments = args;
-
-	switch (arguments->op->op) {
-	case INSERT:
-		hash_insert(arguments->table, arguments->op->key, arguments->op->val);
-		break;
-	case REMOVE:
-		hash_remove(arguments->table, arguments->op->key);
-		break;
-	case CONTAINS:
-		hash_contains(arguments->table, arguments->op->key);
-		break;
-	case UPDATE:
-		hash_update(arguments->table, arguments->op->key, arguments->op->val);
-		break;
-	case COMPUTE:
-		list_node_compute(arguments->table, arguments->op->key,
-				arguments->op->compute_func, arguments->op->val);
-		break;
-	}
-
-	free(arguments);
-	return NULL;
-}
-
-void hash_batch(hashtable_t* table, int num_ops, op_t* ops) {
-	pthread_t threadArray[num_ops];
-
-	for (int i = 0; i < num_ops; ++i) {
-		Args args = malloc(sizeof(*args));
-		args->table = table;
-		args->op = ops + i;
-
-		pthread_create(threadArray + i, NULL, thread_routine, args);
-	}
-
-	void** retval = malloc(sizeof(*retval));
-	for (int i = 0; i < num_ops; ++i) {
-		pthread_join(threadArray[i],retval);
-	}
-
 }
