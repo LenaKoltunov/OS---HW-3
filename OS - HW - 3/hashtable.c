@@ -368,7 +368,6 @@ int hash_contains(hashtable_t* table, int key) {
 
 int list_node_compute(hashtable_t* table, int key, void* (*compute_func)(void*),
 		void** result) {
-<<<<<<< HEAD
 //	if (!table || !compute_func || !result)
 //		return -1;
 //
@@ -397,24 +396,8 @@ int list_node_compute(hashtable_t* table, int key, void* (*compute_func)(void*),
 //	}
 //	pthread_mutex_unlock(&curr->mutex);
 //	return false;
-=======
-	if (!table || !compute_func)
-		return -1;
-	if(table->stop_flag){
-		return -1;
-	}
-//	Node element = hash_find(table, key);
-//	if (!element)
-//		return 0;
-//	*result = compute_func(element->value);
-	return 1;
->>>>>>> refs/remotes/origin/master
 }
 
-<<<<<<< HEAD
-=======
-//TODO synchronisation
->>>>>>> refs/remotes/origin/master
 int hash_getbucketsize(hashtable_t* table, int bucket) { //TODO ask if the bucket start from 0?
 	if (!table)
 		return -1;
@@ -429,20 +412,13 @@ int hash_getbucketsize(hashtable_t* table, int bucket) { //TODO ask if the bucke
 typedef struct args_t {
 	Hashtable table;
 	Op op;
-	sem_t* semPtr;
 	bool* runThreads;
 }* Args;
 
 void* thread_routine(void* args) {
 	Args arguments = args;
 
-<<<<<<< HEAD
 	while (!(arguments->runThreads)) {};
-=======
-	pthread_mutex_lock(arguments->table->nr_threads_lock);
-	arguments->table->nr_threads++;
-	pthread_mutex_unlock(arguments->table->nr_threads_lock);
->>>>>>> refs/remotes/origin/master
 
 	switch (arguments->op->op) {
 	case INSERT:
@@ -475,10 +451,7 @@ void* thread_routine(void* args) {
 
 void hash_batch(hashtable_t* table, int num_ops, op_t* ops) {
 	pthread_t threadArray[num_ops];
-<<<<<<< HEAD
 	bool runThreads = false;
-=======
->>>>>>> refs/remotes/origin/master
 
 	for (int i = 0; i < num_ops; ++i) {
 		Args args = malloc(sizeof(*args));
@@ -498,9 +471,6 @@ void hash_batch(hashtable_t* table, int num_ops, op_t* ops) {
 	for (int i = 0; i < num_ops; ++i) {
 		pthread_join(threadArray[i], retval);
 	}
-<<<<<<< HEAD
 	free(retval);
-=======
->>>>>>> refs/remotes/origin/master
 
 }
