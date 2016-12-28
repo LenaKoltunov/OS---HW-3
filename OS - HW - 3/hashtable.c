@@ -28,6 +28,8 @@ typedef struct hashtable_t {
 	Node* table;
 	pthread_mutex_t* empty_list_locks; //locks only for dummy node, not entire list
 	int* buckets_sizes;
+	Node threads_ids;
+	pthread_mutex_t empty_threads_list_lock;
 }* Hashtable;
 
 typedef op_t* Op;
@@ -177,6 +179,11 @@ bool list_contains(Node head, int key) {
 	pthread_mutex_lock(&curr->mutex);
 	prev = NULL;
 
+	if (curr->key == key) {
+		pthread_mutex_unlock(&curr->mutex);
+		return true;
+	}
+
 	while (curr->next) {
 		if (prev)
 			pthread_mutex_unlock(&prev->mutex);
@@ -185,6 +192,7 @@ bool list_contains(Node head, int key) {
 		curr = curr->next;
 
 		if (curr->key == key) {
+			pthread_mutex_unlock(&curr->mutex);
 			return true;
 		}
 	}
@@ -237,6 +245,12 @@ hashtable_t* hash_alloc(int buckets, int (*hash)(int, int)) {
 	hashtable->hash_func = hash;
 	hashtable->nr_buckets = buckets;
 	hashtable->nr_elements = 0;
+	hashtable->threads_ids = NULL;
+
+	pthread_mutexattr_t attr;
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK_NP);
+	pthread_mutex_init(&hashtable->empty_threads_list_lock, &attr);
 	return hashtable;
 }
 
@@ -249,6 +263,7 @@ int hash_free(hashtable_t* ht) {
 		list_destroy(ht->table[i]);
 		pthread_mutex_destroy(&ht->empty_list_locks[i]);
 	}
+	list_destroy(ht->threads_ids);
 	free(ht->empty_list_locks);
 	free(ht->table);
 	free(ht->buckets_sizes);
@@ -337,8 +352,8 @@ int list_node_compute(hashtable_t* table, int key, void* (*compute_func)(void*),
 	return 1;
 }
 
-//TODO synchronisation
 
+//TODO synchronisation
 int hash_getbucketsize(hashtable_t* table, int bucket) { //TODO ask if the bucket start from 0?
 	if (!table)
 		return -1;
@@ -375,11 +390,15 @@ void* thread_routine(void* args) {
 	}
 
 	free(arguments);
+	int pid=pthread_self();
+	list_remove(arguments->table->threads_ids, pid);
+
 	return NULL;
 }
 
 void hash_batch(hashtable_t* table, int num_ops, op_t* ops) {
 	pthread_t threadArray[num_ops];
+
 
 	for (int i = 0; i < num_ops; ++i) {
 		Args args = malloc(sizeof(*args));
@@ -387,11 +406,14 @@ void hash_batch(hashtable_t* table, int num_ops, op_t* ops) {
 		args->op = ops + i;
 
 		pthread_create(threadArray + i, NULL, thread_routine, args);
+
+		Node pid_node = node_alloc(threadArray[i], NULL);
+		list_add(&table->threads_ids, pid_node, table->empty_threads_list_lock);
 	}
 
 	void** retval = malloc(sizeof(*retval));
 	for (int i = 0; i < num_ops; ++i) {
-		pthread_join(threadArray[i],retval);
+		pthread_join(threadArray[i], retval);
 	}
 
 }
