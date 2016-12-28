@@ -23,13 +23,14 @@ typedef struct node_t {
 typedef int (*Hash)(int, int);
 
 typedef struct hashtable_t {
-	int nr_buckets, nr_elements;
+	int nr_buckets, nr_elements, nr_threads, stop_flag;
 	Hash hash_func;
 	Node* table;
 	pthread_mutex_t* empty_list_locks; //locks only for dummy node, not entire list
 	int* buckets_sizes;
 	Node threads_ids;
 	pthread_mutex_t empty_threads_list_lock;
+	pthread_mutex_t nr_threads_lock;
 }* Hashtable;
 
 typedef op_t* Op;
@@ -82,6 +83,7 @@ int list_add(Node* dest, Node element, pthread_mutex_t *head_mutex) {
 	//case of empty list, head == NULL
 	if (!curr) {
 		pthread_mutex_lock(head_mutex);
+
 		*dest = element;
 		pthread_mutex_unlock(head_mutex);
 		return 1;
@@ -245,13 +247,24 @@ hashtable_t* hash_alloc(int buckets, int (*hash)(int, int)) {
 	hashtable->hash_func = hash;
 	hashtable->nr_buckets = buckets;
 	hashtable->nr_elements = 0;
+	hashtable->nr_threads = 0;
+	hashtable->stop_flag = 0;
 	hashtable->threads_ids = NULL;
 
 	pthread_mutexattr_t attr;
-	pthread_mutexattr_init(&attr);
-	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK_NP);
 	pthread_mutex_init(&hashtable->empty_threads_list_lock, &attr);
+	pthread_mutex_init(&hashtable->nr_threads_lock, &attr);
+
 	return hashtable;
+}
+
+int hash_stop(hashtable_t* table) {
+	if (!table)
+		return -1;
+	table->stop_flag=1;
+	while(table->nr_threads>0){
+	}
+	return 1;
 }
 
 //Done
@@ -259,10 +272,15 @@ int hash_free(hashtable_t* ht) {
 	if (ht == NULL) {
 		return -1;
 	}
+	if(!ht->stop_flag){
+		return 0;
+	}
 	for (int i = 0; i < ht->nr_buckets; ++i) {
 		list_destroy(ht->table[i]);
 		pthread_mutex_destroy(&ht->empty_list_locks[i]);
 	}
+	pthread_mutex_destroy(&ht->empty_threads_list_lock);
+	pthread_mutex_destroy(&ht->nr_threads_lock);
 	list_destroy(ht->threads_ids);
 	free(ht->empty_list_locks);
 	free(ht->table);
@@ -275,6 +293,9 @@ int hash_free(hashtable_t* ht) {
 int hash_insert(hashtable_t* table, int key, void* val) {
 	if (!table)
 		return -1;
+	if(table->stop_flag){
+		return -1;
+	}
 	Node new_element = node_alloc(key, val);
 	int hashed_key = table->hash_func(table->nr_buckets, key);
 
@@ -297,6 +318,9 @@ int hash_insert(hashtable_t* table, int key, void* val) {
 int hash_update(hashtable_t* table, int key, void *val) {
 	if (!table)
 		return -1;
+	if(table->stop_flag){
+		return -1;
+	}
 	int hashed_key = table->hash_func(table->nr_buckets, key);
 	return list_update(table->table[hashed_key], key, val);
 
@@ -306,6 +330,9 @@ int hash_update(hashtable_t* table, int key, void *val) {
 int hash_remove(hashtable_t* table, int key) {
 	if (!table)
 		return -1;
+	if(table->stop_flag){
+		return -1;
+	}
 	int hashed_key = table->hash_func(table->nr_buckets, key);
 	Node head = table->table[hashed_key];
 	//The element is the head:
@@ -334,6 +361,9 @@ int hash_remove(hashtable_t* table, int key) {
 int hash_contains(hashtable_t* table, int key) {
 	if (!table)
 		return -1;
+	if(table->stop_flag){
+		return -1;
+	}
 	int hashed_key = table->hash_func(table->nr_buckets, key);
 	if (list_contains(table->table[hashed_key], key))
 		return 1;
@@ -343,8 +373,11 @@ int hash_contains(hashtable_t* table, int key) {
 //TODO synchronisation
 int list_node_compute(hashtable_t* table, int key, void* (*compute_func)(void*),
 		void** result) {
-//	if (!table || !compute_func)
-//		return -1;
+	if (!table || !compute_func)
+		return -1;
+	if(table->stop_flag){
+		return -1;
+	}
 //	Node element = hash_find(table, key);
 //	if (!element)
 //		return 0;
@@ -352,11 +385,13 @@ int list_node_compute(hashtable_t* table, int key, void* (*compute_func)(void*),
 	return 1;
 }
 
-
 //TODO synchronisation
 int hash_getbucketsize(hashtable_t* table, int bucket) { //TODO ask if the bucket start from 0?
 	if (!table)
 		return -1;
+	if(table->stop_flag){
+		return -1;
+	}
 	if (bucket < 0 || bucket >= table->nr_buckets)
 		return -1;
 	return table->buckets_sizes[bucket];
@@ -369,6 +404,10 @@ typedef struct args_t {
 
 void* thread_routine(void* args) {
 	Args arguments = args;
+
+	pthread_mutex_lock(arguments->table->nr_threads_lock);
+	arguments->table->nr_threads++;
+	pthread_mutex_unlock(arguments->table->nr_threads_lock);
 
 	switch (arguments->op->op) {
 	case INSERT:
@@ -390,15 +429,17 @@ void* thread_routine(void* args) {
 	}
 
 	free(arguments);
-	int pid=pthread_self();
+	int pid = pthread_self();
 	list_remove(arguments->table->threads_ids, pid);
 
+	pthread_mutex_lock(arguments->table->nr_threads_lock);
+	arguments->table->nr_threads--;
+	pthread_mutex_unlock(arguments->table->nr_threads_lock);
 	return NULL;
 }
 
 void hash_batch(hashtable_t* table, int num_ops, op_t* ops) {
 	pthread_t threadArray[num_ops];
-
 
 	for (int i = 0; i < num_ops; ++i) {
 		Args args = malloc(sizeof(*args));
