@@ -24,12 +24,12 @@ typedef struct node_t {
 typedef int (*Hash)(int, int);
 
 typedef struct hashtable_t {
-	int nr_buckets, nr_elements, nr_threads, stop_flag;
+	int nr_buckets, nr_threads, stopped;
 	Hash hash_func;
 	Node* table;
 	pthread_mutex_t* empty_list_locks; //locks only for dummy node, not entire list
 	int* buckets_sizes;
-	Node threads_ids;
+	pthread_mutex_t* sizes_locks;
 	pthread_mutex_t empty_threads_list_lock;
 	pthread_mutex_t nr_threads_lock;
 }* Hashtable;
@@ -68,6 +68,7 @@ void list_destroy(Node node) {
 	if (!node)
 		return;
 	list_destroy(node->next);
+	pthread_mutex_destroy(&node->mutex);
 	free(node);
 }
 
@@ -84,7 +85,6 @@ int list_add(Node* dest, Node element, pthread_mutex_t *head_mutex) {
 	//case of empty list, head == NULL
 	if (!curr) {
 		pthread_mutex_lock(head_mutex);
-
 		*dest = element;
 		pthread_mutex_unlock(head_mutex);
 		return 1;
@@ -96,6 +96,7 @@ int list_add(Node* dest, Node element, pthread_mutex_t *head_mutex) {
 		pthread_mutex_unlock(&curr->mutex);
 		return 0;
 	}
+
 	while (curr->next) {
 		if (curr->key == element->key) {
 			pthread_mutex_unlock(&curr->mutex);
@@ -105,8 +106,9 @@ int list_add(Node* dest, Node element, pthread_mutex_t *head_mutex) {
 			pthread_mutex_unlock(&prev->mutex);
 		prev = curr;
 		curr = curr->next;
-		if (curr)
-			pthread_mutex_lock(&curr->mutex);
+		pthread_mutex_lock(&curr->mutex);
+
+
 	}
 	curr->next = element;
 	pthread_mutex_unlock(&curr->mutex);
@@ -120,6 +122,12 @@ int list_update(Node head, int key, void* val) {
 		return 0;
 	pthread_mutex_lock(&curr->mutex);
 	prev = NULL;
+
+	if (curr->key == key) {
+		curr->value = val;
+		pthread_mutex_unlock(&curr->mutex);
+		return 1;
+	}
 
 	while (curr->next) {
 		if (prev)
@@ -237,6 +245,13 @@ hashtable_t* hash_alloc(int buckets, int (*hash)(int, int)) {
 		return NULL;
 	}
 
+	// Allocate array of mutexs for empty lists
+	if ((hashtable->sizes_locks = malloc(sizeof(pthread_mutex_t) * buckets))
+			== NULL) {
+		hash_free(hashtable);
+		return NULL;
+	}
+
 	for (int i = 0; i < buckets; i++) {
 		hashtable->table[i] = NULL;
 		hashtable->buckets_sizes[i] = 0;
@@ -244,13 +259,13 @@ hashtable_t* hash_alloc(int buckets, int (*hash)(int, int)) {
 		pthread_mutexattr_init(&attr);
 		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK_NP);
 		pthread_mutex_init(&hashtable->empty_list_locks[i], &attr);
+		pthread_mutex_init(&hashtable->sizes_locks[i], &attr);
 	}
+
 	hashtable->hash_func = hash;
 	hashtable->nr_buckets = buckets;
-	hashtable->nr_elements = 0;
 	hashtable->nr_threads = 0;
-	hashtable->stop_flag = 0;
-	hashtable->threads_ids = NULL;
+	hashtable->stopped = 0;
 
 	pthread_mutexattr_t attr;
 	pthread_mutex_init(&hashtable->empty_threads_list_lock, &attr);
@@ -262,9 +277,10 @@ hashtable_t* hash_alloc(int buckets, int (*hash)(int, int)) {
 int hash_stop(hashtable_t* table) {
 	if (!table)
 		return -1;
-	table->stop_flag=1;
-	while(table->nr_threads>0){
+	if (table->stopped == 1) {
+		return -1;
 	}
+	table->stopped = 1;
 	return 1;
 }
 
@@ -272,16 +288,17 @@ int hash_free(hashtable_t* ht) {
 	if (ht == NULL) {
 		return -1;
 	}
-	if(!ht->stop_flag){
+	if (!ht->stopped) {
 		return 0;
 	}
 	for (int i = 0; i < ht->nr_buckets; ++i) {
 		list_destroy(ht->table[i]);
 		pthread_mutex_destroy(&ht->empty_list_locks[i]);
+		pthread_mutex_destroy(&ht->sizes_locks[i]);
 	}
 	pthread_mutex_destroy(&ht->empty_threads_list_lock);
 	pthread_mutex_destroy(&ht->nr_threads_lock);
-	list_destroy(ht->threads_ids);
+	free(ht->sizes_locks);
 	free(ht->empty_list_locks);
 	free(ht->table);
 	free(ht->buckets_sizes);
@@ -293,11 +310,14 @@ int hash_free(hashtable_t* ht) {
 int hash_insert(hashtable_t* table, int key, void* val) {
 	if (!table)
 		return -1;
-	if(table->stop_flag){
+	if (table->stopped) {
 		return -1;
 	}
 	Node new_element = node_alloc(key, val);
 	int hashed_key = table->hash_func(table->nr_buckets, key);
+	if (hashed_key < 0 || hashed_key >= table->nr_buckets) {
+		return -1;
+	}
 
 	int retval = list_add(&table->table[hashed_key], new_element,
 			&table->empty_list_locks[hashed_key]);
@@ -306,8 +326,9 @@ int hash_insert(hashtable_t* table, int key, void* val) {
 		free(new_element);
 		return 0;
 	} else if (retval == 1) {
-		table->nr_elements++;
+		pthread_mutex_lock(&table->sizes_locks[hashed_key]);
 		table->buckets_sizes[hashed_key]++;
+		pthread_mutex_unlock(&table->sizes_locks[hashed_key]);
 		return 1;
 	}
 	free(new_element);
@@ -317,10 +338,14 @@ int hash_insert(hashtable_t* table, int key, void* val) {
 int hash_update(hashtable_t* table, int key, void *val) {
 	if (!table)
 		return -1;
-	if(table->stop_flag){
+	if (table->stopped) {
 		return -1;
 	}
 	int hashed_key = table->hash_func(table->nr_buckets, key);
+	if (hashed_key < 0 || hashed_key >= table->nr_buckets) {
+		return -1;
+	}
+
 	return list_update(table->table[hashed_key], key, val);
 
 }
@@ -328,24 +353,34 @@ int hash_update(hashtable_t* table, int key, void *val) {
 int hash_remove(hashtable_t* table, int key) {
 	if (!table)
 		return -1;
-	if(table->stop_flag){
+	if (table->stopped) {
 		return -1;
 	}
+
 	int hashed_key = table->hash_func(table->nr_buckets, key);
+	if (hashed_key < 0 || hashed_key >= table->nr_buckets) {
+		return -1;
+	}
+
 	Node head = table->table[hashed_key];
 	//The element is the head:
 	if (head) {
 		pthread_mutex_lock(&head->mutex);
 		if (head->key == key) {
 			table->table[hashed_key] = head->next;
-			free(head);
 			pthread_mutex_unlock(&head->mutex);
+			pthread_mutex_destroy(&head->mutex);
+			free(head);
+			pthread_mutex_lock(&table->sizes_locks[hashed_key]);
+			table->buckets_sizes[hashed_key]--;
+			pthread_mutex_unlock(&table->sizes_locks[hashed_key]);
 			return 1;
 		}
 		pthread_mutex_unlock(&head->mutex);
 		if (list_remove(head, key) == 1) {
-			table->nr_elements--;
+			pthread_mutex_lock(&table->sizes_locks[hashed_key]);
 			table->buckets_sizes[hashed_key]--;
+			pthread_mutex_unlock(&table->sizes_locks[hashed_key]);
 			return 1;
 		} else if (list_remove(head, key) == -1) {
 			return -1;
@@ -357,10 +392,14 @@ int hash_remove(hashtable_t* table, int key) {
 int hash_contains(hashtable_t* table, int key) {
 	if (!table)
 		return -1;
-	if(table->stop_flag){
+	if (table->stopped) {
 		return -1;
 	}
 	int hashed_key = table->hash_func(table->nr_buckets, key);
+	if (hashed_key < 0 || hashed_key >= table->nr_buckets) {
+		return -1;
+	}
+
 	if (list_contains(table->table[hashed_key], key))
 		return 1;
 	return 0;
@@ -368,45 +407,58 @@ int hash_contains(hashtable_t* table, int key) {
 
 int list_node_compute(hashtable_t* table, int key, void* (*compute_func)(void*),
 		void** result) {
-//	if (!table || !compute_func || !result)
-//		return -1;
-//
-//	int hashed_key = table->hash_func(table->nr_buckets, key);
-//	Node curr = table->table[hashed_key];
-//	Node prev = NULL;
-//
-//	pthread_mutex_lock(&curr->mutex);
-//
-//	if (curr->key == key) {
-//		pthread_mutex_unlock(&curr->mutex);
-//		return true;
-//	}
-//
-//	while (curr->next) {
-//		if (prev)
-//			pthread_mutex_unlock(&prev->mutex);
-//		prev = curr;
-//		pthread_mutex_lock(&curr->next->mutex);
-//		curr = curr->next;
-//
-//		if (curr->key == key) {
-//			pthread_mutex_unlock(&curr->mutex);
-//			return true;
-//		}
-//	}
-//	pthread_mutex_unlock(&curr->mutex);
-//	return false;
+	if (!table || !compute_func || !result)
+		return -1;
+
+	int hashed_key = table->hash_func(table->nr_buckets, key);
+	if (hashed_key < 0 || hashed_key >= table->nr_buckets) {
+		return -1;
+	}
+
+	Node curr = table->table[hashed_key];
+	if (!curr)
+		return 0;
+
+	Node prev = NULL;
+
+	pthread_mutex_lock(&curr->mutex);
+
+	if (curr->key == key) {
+		*result = compute_func(curr->value);
+		pthread_mutex_unlock(&curr->mutex);
+		return 1;
+	}
+
+	while (curr->next) {
+		if (prev)
+			pthread_mutex_unlock(&prev->mutex);
+		prev = curr;
+		pthread_mutex_lock(&curr->next->mutex);
+		curr = curr->next;
+
+		if (curr->key == key) {
+			*result = compute_func(curr->value);
+			pthread_mutex_unlock(&curr->mutex);
+			return 1;
+		}
+	}
+	pthread_mutex_unlock(&curr->mutex);
+	return 0;
 }
 
 int hash_getbucketsize(hashtable_t* table, int bucket) { //TODO ask if the bucket start from 0?
 	if (!table)
 		return -1;
-	if(table->stop_flag){
+	if (table->stopped) {
 		return -1;
 	}
 	if (bucket < 0 || bucket >= table->nr_buckets)
 		return -1;
-	return table->buckets_sizes[bucket];
+	pthread_mutex_lock(&table->sizes_locks[bucket]);
+	int res = table->buckets_sizes[bucket];
+	pthread_mutex_unlock(&table->sizes_locks[bucket]);
+
+	return res;
 }
 
 typedef struct args_t {
@@ -418,34 +470,34 @@ typedef struct args_t {
 void* thread_routine(void* args) {
 	Args arguments = args;
 
-	while (!(arguments->runThreads)) {};
+	while (!(arguments->runThreads)) {
+	};
 
 	switch (arguments->op->op) {
 	case INSERT:
-		hash_insert(arguments->table, arguments->op->key, arguments->op->val);
+		arguments->op->result = hash_insert(arguments->table, arguments->op->key, arguments->op->val);
 		break;
 	case REMOVE:
-		hash_remove(arguments->table, arguments->op->key);
+		arguments->op->result = hash_remove(arguments->table, arguments->op->key);
 		break;
 	case CONTAINS:
-		hash_contains(arguments->table, arguments->op->key);
+		arguments->op->result =  hash_contains(arguments->table, arguments->op->key);
 		break;
 	case UPDATE:
-		hash_update(arguments->table, arguments->op->key, arguments->op->val);
+		arguments->op->result = hash_update(arguments->table, arguments->op->key, arguments->op->val);
 		break;
 	case COMPUTE:
-		list_node_compute(arguments->table, arguments->op->key,
+		arguments->op->result = list_node_compute(arguments->table, arguments->op->key,
 				arguments->op->compute_func, arguments->op->val);
 		break;
 	}
 
-	free(arguments);
-	int pid = pthread_self();
-	list_remove(arguments->table->threads_ids, pid);
-
-	pthread_mutex_lock(arguments->table->nr_threads_lock);
+	pthread_mutex_lock(&arguments->table->nr_threads_lock);
 	arguments->table->nr_threads--;
-	pthread_mutex_unlock(arguments->table->nr_threads_lock);
+	pthread_mutex_unlock(&arguments->table->nr_threads_lock);
+
+	free(arguments);
+
 	return NULL;
 }
 
@@ -461,8 +513,6 @@ void hash_batch(hashtable_t* table, int num_ops, op_t* ops) {
 
 		pthread_create(threadArray + i, NULL, thread_routine, args);
 
-		Node pid_node = node_alloc(threadArray[i], NULL);
-		list_add(&table->threads_ids, pid_node, &(table->empty_threads_list_lock));
 	}
 
 	runThreads = true;
