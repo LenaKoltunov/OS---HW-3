@@ -22,7 +22,7 @@ typedef struct op_t
 } op_t;
 
 hashtable_t* hash_alloc(int buckets, int (*hash)(int, int));
-int hash_stop(hashtable_t* table); //TODO
+int hash_stop(hashtable_t* table);
 int hash_free(hashtable_t* table);
 int hash_insert(hashtable_t* table, int key, void *val);
 int hash_update(hashtable_t* table, int key, void *val);
