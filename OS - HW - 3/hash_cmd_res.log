@@ -82,12 +82,12 @@ Thread: 80 returned with result: 1
 Thread: 81 returned with result: 0
 Thread: 82 returned with result: 0
 Thread: 83 returned with result: 1
-Thread: 84 returned with result: 1
 Thread: 85 returned with result: 0
 Thread: 86 returned with result: 1
 Thread: 87 returned with result: 0
 Thread: 88 returned with result: 0
 Thread: 89 returned with result: 1
+Thread: 84 returned with result: 1
 Thread: 90 returned with result: 0
 Thread: 92 returned with result: 0
 Thread: 93 returned with result: 0
@@ -96,6 +96,7 @@ Thread: 95 returned with result: 1
 Thread: 96 returned with result: 0
 Thread: 97 returned with result: 0
 Thread: 98 returned with result: 1
+Thread: 99 returned with result: 0
 Thread: 100 returned with result: 0
 Thread: 101 returned with result: 0
 Thread: 103 returned with result: 0
@@ -158,7 +159,6 @@ Thread: 160 returned with result: 0
 Thread: 161 returned with result: 1
 Thread: 162 returned with result: 0
 Thread: 163 returned with result: 0
-Thread: 164 returned with result: 0
 Thread: 165 returned with result: 1
 Thread: 166 returned with result: 0
 Thread: 167 returned with result: 0
@@ -168,6 +168,7 @@ Thread: 170 returned with result: 0
 Thread: 171 returned with result: 0
 Thread: 172 returned with result: 0
 Thread: 173 returned with result: 0
+Thread: 164 returned with result: 0
 Thread: 174 returned with result: 0
 Thread: 175 returned with result: 0
 Thread: 177 returned with result: 1
@@ -227,6 +228,7 @@ Thread: 236 returned with result: 0
 Thread: 237 returned with result: 0
 Thread: 238 returned with result: 1
 Thread: 239 returned with result: 0
+Thread: 241 returned with result: 0
 Thread: 242 returned with result: 0
 Thread: 243 returned with result: 0
 Thread: 244 returned with result: 0
@@ -237,8 +239,9 @@ Thread: 250 returned with result: 0
 Thread: 252 returned with result: 0
 Thread: 253 returned with result: 0
 Thread: 254 returned with result: 1
-Thread: 256 returned with result: 0
 Thread: 255 returned with result: 0
+Thread: 256 returned with result: 0
+Thread: 257 returned with result: 0
 Thread: 258 returned with result: 0
 Thread: 259 returned with result: 1
 Thread: 260 returned with result: 0
@@ -287,9 +290,9 @@ Thread: 303 returned with result: 0
 Thread: 305 returned with result: 0
 Thread: 306 returned with result: 0
 Thread: 308 returned with result: 1
-Thread: 309 returned with result: 1
 Thread: 310 returned with result: 1
 Thread: 311 returned with result: 0
+Thread: 309 returned with result: 1
 Thread: 312 returned with result: 0
 Thread: 313 returned with result: 0
 Thread: 314 returned with result: 1
@@ -302,6 +305,7 @@ Thread: 320 returned with result: 0
 Thread: 321 returned with result: 1
 Thread: 322 returned with result: 1
 Thread: 323 returned with result: 0
+Thread: 325 returned with result: 0
 Thread: 327 returned with result: 0
 Thread: 328 returned with result: 0
 Thread: 329 returned with result: 1
@@ -325,7 +329,6 @@ Thread: 355 returned with result: 1
 Thread: 356 returned with result: 0
 Thread: 357 returned with result: 0
 Thread: 358 returned with result: 0
-Thread: 359 returned with result: 0
 Thread: 360 returned with result: 0
 Thread: 361 returned with result: 1
 Thread: 362 returned with result: 0
@@ -338,8 +341,5 @@ Thread: 368 returned with result: 1
 Thread: 369 returned with result: 0
 Thread: 370 returned with result: 0
 Thread: 371 returned with result: 1
-Thread: 372 returned with result: 1
-Thread: 373 returned with result: 0
-Thread: 374 returned with result: 1
-Thread: 375 returned with result: 0
-Thread: 376 returned with
+Thread: 359 returned with result: 0
+Thread: 372 returned with 

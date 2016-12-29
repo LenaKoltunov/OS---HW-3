@@ -128,6 +128,7 @@ int list_add(Node* dest, Node element, pthread_mutex_t *head_mutex) {
 		if(prev){
 			pthread_mutex_unlock(&prev->mutex);
 		}
+		}
 		prev=curr;
 		curr=curr->next;
 
@@ -141,10 +142,9 @@ int list_add(Node* dest, Node element, pthread_mutex_t *head_mutex) {
 int list_update(Node head, int key, void* val) {
 	Node curr, prev;
 	curr = head;
+	prev = NULL;
 	if (!head)
 		return 0;
-	pthread_mutex_lock(&curr->mutex);
-	prev = NULL;
 
 	if (curr->key == key) {
 		curr->value = val;
@@ -152,20 +152,24 @@ int list_update(Node head, int key, void* val) {
 		return 1;
 	}
 
-	while (curr->next) {
-		if (prev)
-			pthread_mutex_unlock(&prev->mutex);
-		prev = curr;
-		pthread_mutex_lock(&curr->next->mutex);
-		curr = curr->next;
-
+	while (curr) {
+		pthread_mutex_lock(&curr->mutex);
 		if (curr->key == key) {
 			curr->value = val;
+			if (prev) {
+				pthread_mutex_unlock(&prev->mutex);
+			}
 			pthread_mutex_unlock(&curr->mutex);
 			return 1;
 		}
+		if (prev) {
+			pthread_mutex_unlock(&prev->mutex);
+		}
+		prev = curr;
+		curr = curr->next;
+
 	}
-	pthread_mutex_unlock(&curr->mutex);
+	pthread_mutex_unlock(&prev->mutex);
 	return 0;
 
 }
@@ -177,60 +181,52 @@ int list_update(Node head, int key, void* val) {
  */
 int list_remove(Node head, int key) {
 	Node curr, prev;
+	curr = head;
+	prev = NULL;
 	if (!head)
 		return 0;
 
-	curr = head;
-	pthread_mutex_lock(&curr->mutex);
-	prev = NULL;
-
-	while (curr->next) {
-		if (prev)
-			pthread_mutex_unlock(&prev->mutex);
-		prev = curr;
-		pthread_mutex_lock(&curr->next->mutex);
-		curr = curr->next;
-
+	while (curr) {
+		pthread_mutex_lock(&curr->mutex);
 		if (curr->key == key) {
 			prev->next = curr->next;
+			pthread_mutex_unlock(&prev->mutex);
 			pthread_mutex_unlock(&curr->mutex);
 			pthread_mutex_destroy(&curr->mutex);
-
 			free(curr);
 			return 1;
 		}
+		pthread_mutex_unlock(&prev->mutex);
+		prev = curr;
+		curr = curr->next;
 	}
-	pthread_mutex_unlock(&curr->mutex);
+	pthread_mutex_unlock(&prev->mutex);
 	return 0;
 }
 
 bool list_contains(Node head, int key) {
 	Node curr, prev;
+	curr = head;
+	prev = NULL;
 	if (!head)
 		return false;
 
-	curr = head;
-	pthread_mutex_lock(&curr->mutex);
-	prev = NULL;
-
-	if (curr->key == key) {
-		pthread_mutex_unlock(&curr->mutex);
-		return true;
-	}
-
-	while (curr->next) {
-		if (prev)
-			pthread_mutex_unlock(&prev->mutex);
-		prev = curr;
-		pthread_mutex_lock(&curr->next->mutex);
-		curr = curr->next;
-
+	while (curr) {
+		pthread_mutex_lock(&curr->mutex);
 		if (curr->key == key) {
+			if (prev) {
+				pthread_mutex_unlock(&prev->mutex);
+			}
 			pthread_mutex_unlock(&curr->mutex);
 			return true;
 		}
+		if (prev) {
+			pthread_mutex_unlock(&prev->mutex);
+		}
+		prev = curr;
+		curr = curr->next;
 	}
-	pthread_mutex_unlock(&curr->mutex);
+	pthread_mutex_unlock(&prev->mutex);
 	return false;
 }
 
@@ -494,6 +490,9 @@ typedef struct args_t {
 
 void* thread_routine(void* args) {
 	Args arguments = args;
+	pthread_mutex_lock(&arguments->table->nr_threads_lock);
+	arguments->table->nr_threads++;
+	pthread_mutex_unlock(&arguments->table->nr_threads_lock);
 
 	while (!(arguments->runThreads)) {
 	};
