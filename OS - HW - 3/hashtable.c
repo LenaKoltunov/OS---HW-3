@@ -33,6 +33,8 @@ typedef struct hashtable_t {
 	pthread_mutex_t* sizes_locks;
 	pthread_mutex_t empty_threads_list_lock;
 	pthread_mutex_t nr_threads_lock;
+	pthread_mutex_t stop_lock;
+	pthread_cond_t stop_condition;
 }* Hashtable;
 
 typedef op_t* Op;
@@ -248,6 +250,7 @@ hashtable_t* hash_alloc(int buckets, int (*hash)(int, int)) {
 		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK_NP);
 		pthread_mutex_init(&hashtable->empty_list_locks[i], &attr);
 		pthread_mutex_init(&hashtable->sizes_locks[i], &attr);
+
 	}
 
 	hashtable->hash_func = hash;
@@ -258,7 +261,8 @@ hashtable_t* hash_alloc(int buckets, int (*hash)(int, int)) {
 	pthread_mutexattr_t attr;
 	pthread_mutex_init(&hashtable->empty_threads_list_lock, &attr);
 	pthread_mutex_init(&hashtable->nr_threads_lock, &attr);
-
+	pthread_mutex_init(&hashtable->stop_lock, &attr);
+	pthread_cond_init(&hashtable->stop_condition, NULL);
 	return hashtable;
 }
 
@@ -269,6 +273,12 @@ int hash_stop(hashtable_t* table) {
 		return -1;
 	}
 	table->stopped = 1;
+	while (table->nr_threads > 0) {
+
+	}
+	pthread_mutex_lock(&table->stop_lock);
+	pthread_cond_signal(&table->stop_condition);
+	pthread_mutex_unlock(&table->stop_lock);
 	return 1;
 }
 
@@ -279,6 +289,11 @@ int hash_free(hashtable_t* ht) {
 	if (!ht->stopped) {
 		return 0;
 	}
+	pthread_mutex_lock(&ht->stop_lock);
+	if (ht->nr_threads > 0)
+		pthread_cond_wait(&ht->stop_condition, &ht->stop_lock);
+	pthread_mutex_unlock(&ht->stop_lock);
+
 	for (int i = 0; i < ht->nr_buckets; ++i) {
 		list_destroy(ht->table[i]);
 		pthread_mutex_destroy(&ht->empty_list_locks[i]);
@@ -286,6 +301,8 @@ int hash_free(hashtable_t* ht) {
 	}
 	pthread_mutex_destroy(&ht->empty_threads_list_lock);
 	pthread_mutex_destroy(&ht->nr_threads_lock);
+	pthread_mutex_destroy(&ht->stop_lock);
+	pthread_cond_destroy(&ht->stop_condition);
 	free(ht->sizes_locks);
 	free(ht->empty_list_locks);
 	free(ht->table);
