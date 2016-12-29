@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <semaphore.h>
+#include <stdio.h>
 
 #include "hashtable.h"
 
@@ -77,31 +78,6 @@ void list_destroy(Node node) {
  * adds element to the tail of the list
  * the malloc is outside of this function
  */
-void print_op(op_t op){
-	printf("Key: %d, ", op.key);
-	printf("Result: %d, ", op.result);
-	switch (op.op){
-	case INSERT:
-		printf("Target: INSERT, ");
-		break;
-	case REMOVE:
-			printf("Target: REMOVE, ");
-			break;
-	case CONTAINS:
-			printf("Target: CONTAINS, ");
-			break;
-	case UPDATE:
-			printf("Target: UPDATE, ");
-			break;
-	case COMPUTE:
-			printf("Target: COMPUTE, ");
-			break;
-	default:
-		break;
-	}
-
-}
-
 int list_add(Node* dest, Node element, pthread_mutex_t *head_mutex) {
 	if (!element)
 		return -1;
@@ -116,26 +92,24 @@ int list_add(Node* dest, Node element, pthread_mutex_t *head_mutex) {
 	}
 
 	Node prev = NULL;
-	while(curr){
+	while (curr) {
 		pthread_mutex_lock(&curr->mutex);
 		if (curr->key == element->key) {
-			if(prev){
+			if (prev) {
 				pthread_mutex_unlock(&prev->mutex);
 			}
 			pthread_mutex_unlock(&curr->mutex);
 			return 0;
 		}
-		if(prev){
+		if (prev) {
 			pthread_mutex_unlock(&prev->mutex);
 		}
-		}
-		prev=curr;
-		curr=curr->next;
+		prev = curr;
+		curr = curr->next;
 
 	}
-	prev->next=element;
+	prev->next = element;
 	pthread_mutex_unlock(&prev->mutex);
-
 	return 1;
 }
 
@@ -145,12 +119,6 @@ int list_update(Node head, int key, void* val) {
 	prev = NULL;
 	if (!head)
 		return 0;
-
-	if (curr->key == key) {
-		curr->value = val;
-		pthread_mutex_unlock(&curr->mutex);
-		return 1;
-	}
 
 	while (curr) {
 		pthread_mutex_lock(&curr->mutex);
@@ -181,8 +149,9 @@ int list_update(Node head, int key, void* val) {
  */
 int list_remove(Node head, int key) {
 	Node curr, prev;
-	curr = head;
-	prev = NULL;
+	curr = head->next;
+	prev = head;
+	pthread_mutex_lock(&prev->mutex);
 	if (!head)
 		return 0;
 
@@ -299,7 +268,6 @@ int hash_stop(hashtable_t* table) {
 	if (table->stopped == 1) {
 		return -1;
 	}
-	while (table->nr_threads>0){};
 	table->stopped = 1;
 	return 1;
 }
@@ -397,13 +365,14 @@ int hash_remove(hashtable_t* table, int key) {
 			return 1;
 		}
 		pthread_mutex_unlock(&head->mutex);
-		int res = list_remove(head, key);
-		if (res  == 1) {
+		//----------------------------------------------------
+		int ret = list_remove(head, key);
+		if (ret == 1) {
 			pthread_mutex_lock(&table->sizes_locks[hashed_key]);
 			table->buckets_sizes[hashed_key]--;
 			pthread_mutex_unlock(&table->sizes_locks[hashed_key]);
 			return 1;
-		} else if (res == -1) {
+		} else if (ret == -1) {
 			return -1;
 		}
 	}
@@ -441,29 +410,24 @@ int list_node_compute(hashtable_t* table, int key, void* (*compute_func)(void*),
 		return 0;
 
 	Node prev = NULL;
-
-	pthread_mutex_lock(&curr->mutex);
-
-	if (curr->key == key) {
-		*result = compute_func(curr->value);
-		pthread_mutex_unlock(&curr->mutex);
-		return 1;
-	}
-
-	while (curr->next) {
-		if (prev)
-			pthread_mutex_unlock(&prev->mutex);
-		prev = curr;
-		pthread_mutex_lock(&curr->next->mutex);
-		curr = curr->next;
-
+	while (curr) {
+		pthread_mutex_lock(&curr->mutex);
 		if (curr->key == key) {
 			*result = compute_func(curr->value);
+			if (prev) {
+				pthread_mutex_unlock(&prev->mutex);
+			}
 			pthread_mutex_unlock(&curr->mutex);
 			return 1;
 		}
+		if (prev) {
+			pthread_mutex_unlock(&prev->mutex);
+		}
+		prev = curr;
+		curr = curr->next;
+
 	}
-	pthread_mutex_unlock(&curr->mutex);
+	pthread_mutex_unlock(&prev->mutex);
 	return 0;
 }
 
@@ -499,20 +463,25 @@ void* thread_routine(void* args) {
 
 	switch (arguments->op->op) {
 	case INSERT:
-		arguments->op->result = hash_insert(arguments->table, arguments->op->key, arguments->op->val);
+		arguments->op->result = hash_insert(arguments->table,
+				arguments->op->key, arguments->op->val);
 		break;
 	case REMOVE:
-		arguments->op->result = hash_remove(arguments->table, arguments->op->key);
+		arguments->op->result = hash_remove(arguments->table,
+				arguments->op->key);
 		break;
 	case CONTAINS:
-		arguments->op->result =  hash_contains(arguments->table, arguments->op->key);
+		arguments->op->result = hash_contains(arguments->table,
+				arguments->op->key);
 		break;
 	case UPDATE:
-		arguments->op->result = hash_update(arguments->table, arguments->op->key, arguments->op->val);
+		arguments->op->result = hash_update(arguments->table,
+				arguments->op->key, arguments->op->val);
 		break;
 	case COMPUTE:
-		arguments->op->result = list_node_compute(arguments->table, arguments->op->key,
-				arguments->op->compute_func, arguments->op->val);
+		arguments->op->result = list_node_compute(arguments->table,
+				arguments->op->key, arguments->op->compute_func,
+				&arguments->op->val);
 		break;
 	}
 
@@ -534,10 +503,6 @@ void hash_batch(hashtable_t* table, int num_ops, op_t* ops) {
 		args->table = table;
 		args->op = ops + i;
 		args->runThreads = &runThreads;
-
-		pthread_mutex_lock(&table->nr_threads_lock);
-		table->nr_threads++;
-		pthread_mutex_unlock(&table->nr_threads_lock);
 
 		pthread_create(threadArray + i, NULL, thread_routine, args);
 
